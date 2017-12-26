@@ -16,15 +16,27 @@
 #  under the License.
 
 set -e
+set -x
 
 DIR_OF_SCRIPT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "$DIR_OF_SCRIPT/circleci_env.sh"
+
+"$DIR_OF_SCRIPT/gen_schemas.sh"
 
 if [ "$CI_PULL_REQUEST" = "" ]; then
-  echo "Running test for branch: $CIRCLE_BRANCH"
+  echo "Running tests for Scala $CI_SCALA_VERSION, branch: $CIRCLE_BRANCH"
   JSON_KEY=$(basename $GOOGLE_APPLICATION_CREDENTIALS)
   openssl aes-256-cbc -d -in "$DIR_OF_SCRIPT/$JSON_KEY.enc" -out "$DIR_OF_SCRIPT/$JSON_KEY" -k $ENCRYPTION_KEY
-  "$DIR_OF_SCRIPT/circleci_parallel_run.sh" 'sbt -Dbigquery.project=data-integration-test '"-Dbigquery.secret=$DIR_OF_SCRIPT/$JSON_KEY"' ++$CI_SCALA_VERSION scalastyle coverage test it:test coverageReport coverageAggregate'
+  PROPS="-Dbigquery.project=data-integration-test -Dbigquery.secret=$DIR_OF_SCRIPT/$JSON_KEY"
+  TESTS="test it:test"
 else
-  echo "Running test for PR: $CI_PULL_REQUEST"
-  "$DIR_OF_SCRIPT/circleci_parallel_run.sh" 'sbt -Dbigquery.project=dummy-project ++$CI_SCALA_VERSION scalastyle coverage test coverageReport coverageAggregate'
+  echo "Running tests for Scala $CI_SCALA_VERSION, PR: $CI_PULL_REQUEST"
+  PROPS="-Dbigquery.project=dummy-project"
+  TESTS="test"
+fi
+
+if [ $CI_SCOVERAGE -eq 1 ]; then
+  sbt $PROPS ++$CI_SCALA_VERSION "set every offline := true" scalastyle coverage $TESTS coverageReport coverageAggregate
+else
+  sbt $PROPS ++$CI_SCALA_VERSION "set every offline := true" scalastyle $TESTS
 fi

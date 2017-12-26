@@ -16,16 +16,16 @@
 #  under the License.
 
 set -e
+set -x
 
-case $CIRCLE_NODE_INDEX in
-  0) export CI_SCALA_VERSION="2.11.11"
-    ;;
-  1) export CI_SCALA_VERSION="2.12.4"
-    ;;
-  *)
-    exit 1
-    ;;
-esac
+DIR_OF_SCRIPT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+source "$DIR_OF_SCRIPT/circleci_env.sh"
 
-echo "INFO: scala version is $CI_SCALA_VERSION"
-bash -c "$1"
+if [ $CI_SCOVERAGE -eq 1 ]; then
+  echo "Publishing code coverage for Scala $CI_SCALA_VERSION"
+  bash <(curl -s https://codecov.io/bash)
+fi
+
+if ( [ $CIRCLE_BRANCH = "master" ] && $(grep -q SNAPSHOT version.sbt) ); then
+  sbt ++$CI_SCALA_VERSION "set every offline := true" publish
+fi

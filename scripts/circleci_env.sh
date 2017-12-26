@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 #
 #  Copyright 2017 Spotify AB.
 #
@@ -16,8 +16,21 @@
 #  under the License.
 
 set -e
+set -x
+hostname
 
-DIR_OF_SCRIPT="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+export CI_SCOVERAGE=0
 
-"$DIR_OF_SCRIPT/gen_schemas.sh"
-sbt -Dbigquery.project=data-integration-test coverage "+ test:compile"
+# Reverse order node indices with Scala version. Node 0 is the main build.
+case $CIRCLE_NODE_INDEX in
+  0)
+    export CI_SCALA_VERSION="2.12.4"
+    export CI_SCOVERAGE=1
+    ;;
+  1)
+    export CI_SCALA_VERSION="2.11.11"
+    ;;
+  *)
+    exit 1
+    ;;
+esac
