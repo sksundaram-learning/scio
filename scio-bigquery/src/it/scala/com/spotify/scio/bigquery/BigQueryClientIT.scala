@@ -20,13 +20,16 @@ package com.spotify.scio.bigquery
 import com.google.api.client.googleapis.json.GoogleJsonResponseException
 import com.google.api.services.bigquery.model.{TableFieldSchema, TableSchema}
 import org.apache.beam.sdk.io.gcp.bigquery.BigQueryHelpers
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest._
 
 import scala.collection.JavaConverters._
+import scala.concurrent.{ExecutionContext, Future}
 
-class BigQueryClientIT extends FlatSpec with Matchers {
+class BigQueryClientIT extends AsyncFlatSpec with Matchers {
 
-  val bq = BigQueryClient.defaultInstance()
+  implicit override def executionContext: ExecutionContext = ExecutionContext.Implicits.global
+
+  private val bq = BigQueryClient.defaultInstance()
 
   val legacyQuery =
     "SELECT word, word_count FROM [bigquery-public-data:samples.shakespeare] LIMIT 10"
@@ -35,28 +38,33 @@ class BigQueryClientIT extends FlatSpec with Matchers {
 
   "extractLocation" should "work with legacy syntax" in {
     val query = "SELECT word FROM [data-integration-test:samples_%s.shakespeare]"
-    bq.extractLocation(query.format("us")) shouldBe Some("US")
-    bq.extractLocation(query.format("eu")) shouldBe Some("EU")
+    val f = Future.sequence(Seq(
+      Future(bq.extractLocation(query.format("us"))),
+      Future(bq.extractLocation(query.format("eu")))))
+    f.map(_ shouldBe Seq(Some("US"), Some("EU")))
   }
 
   it should "work with SQL syntax" in {
     val query = "SELECT word FROM `data-integration-test.samples_%s.shakespeare`"
-    bq.extractLocation(query.format("us")) shouldBe Some("US")
-    bq.extractLocation(query.format("eu")) shouldBe Some("EU")
+    val f = Future.sequence(Seq(
+      Future(bq.extractLocation(query.format("us"))),
+      Future(bq.extractLocation(query.format("eu")))))
+    f.map(_ shouldBe Seq(Some("US"), Some("EU")))
   }
 
   it should "support missing source tables" in {
-    bq.extractLocation("SELECT 6") shouldBe None
+    Future(bq.extractLocation("SELECT 6")).map(_ shouldBe None)
   }
+
 
   "extractTables" should "work with legacy syntax" in {
     val tableSpec = BigQueryHelpers.parseTableSpec("bigquery-public-data:samples.shakespeare")
-    bq.extractTables(legacyQuery) shouldBe Set(tableSpec)
+    Future(bq.extractTables(legacyQuery)).map(_ shouldBe Set(tableSpec))
   }
 
   it should "work with SQL syntax" in {
     val tableSpec = BigQueryHelpers.parseTableSpec("bigquery-public-data:samples.shakespeare")
-    bq.extractTables(sqlQuery) shouldBe Set(tableSpec)
+    Future(bq.extractTables(sqlQuery)).map(_ shouldBe Set(tableSpec))
   }
 
   "getQuerySchema" should "work with legacy syntax" in {
@@ -64,7 +72,7 @@ class BigQueryClientIT extends FlatSpec with Matchers {
       new TableFieldSchema().setName("word").setType("STRING").setMode("REQUIRED"),
       new TableFieldSchema().setName("word_count").setType("INTEGER").setMode("REQUIRED")
     ).asJava)
-    bq.getQuerySchema(legacyQuery) shouldBe expected
+    Future(bq.getQuerySchema(legacyQuery)).map(_ shouldBe expected)
   }
 
   it should "work with SQL syntax" in {
@@ -72,48 +80,53 @@ class BigQueryClientIT extends FlatSpec with Matchers {
       new TableFieldSchema().setName("word").setType("STRING").setMode("NULLABLE"),
       new TableFieldSchema().setName("word_count").setType("INTEGER").setMode("NULLABLE")
     ).asJava)
-    bq.getQuerySchema(sqlQuery) shouldBe expected
+    Future(bq.getQuerySchema(sqlQuery)).map(_ shouldBe expected)
   }
 
-  // scalastyle:off no.whitespace.before.left.bracket
   it should "fail invalid legacy syntax" in {
-    (the [GoogleJsonResponseException] thrownBy {
-      bq.getQuerySchema("SELECT word, count FROM [bigquery-public-data:samples.shakespeare]")
-    }).getDetails.getCode shouldBe 400
+    val f = Future(bq.getQuerySchema(
+      "SELECT word, count FROM [bigquery-public-data:samples.shakespeare]"))
+    f.failed.map { case e: GoogleJsonResponseException =>
+      e.getDetails.getCode shouldBe 400
+    }
   }
 
   it should "fail invalid SQL syntax" in {
-    (the [GoogleJsonResponseException] thrownBy {
-      bq.getQuerySchema("SELECT word, count FROM `bigquery-public-data.samples.shakespeare`")
-    }).getDetails.getCode shouldBe 400
+    val f = Future(bq.getQuerySchema(
+      "SELECT word, count FROM `bigquery-public-data.samples.shakespeare`"))
+    f.failed.map { case e: GoogleJsonResponseException =>
+      e.getDetails.getCode shouldBe 400
+    }
   }
-  // scalastyle:on no.whitespace.before.left.bracket
 
   "getQueryRows" should "work with legacy syntax" in {
-    val rows = bq.getQueryRows(legacyQuery).toList
-    rows.size shouldBe 10
-    all(rows.map(_.keySet().asScala)) shouldBe Set("word", "word_count")
+    Future(bq.getQueryRows(legacyQuery).toList).map { rows =>
+      rows.size shouldBe 10
+      all(rows.map(_.keySet().asScala)) shouldBe Set("word", "word_count")
+    }
   }
 
   it should "work with SQL syntax" in {
-    val rows = bq.getQueryRows(sqlQuery).toList
-    rows.size shouldBe 10
-    all(rows.map(_.keySet().asScala)) shouldBe Set("word", "word_count")
+    Future(bq.getQueryRows(sqlQuery).toList).map { rows =>
+      rows.size shouldBe 10
+      all(rows.map(_.keySet().asScala)) shouldBe Set("word", "word_count")
+    }
   }
 
   "getTableSchema" should "work" in {
-    val schema = bq.getTableSchema("bigquery-public-data:samples.shakespeare")
-    val fields = schema.getFields.asScala
-    fields.size shouldBe 4
-    fields.map(_.getName) shouldBe Seq("word", "word_count", "corpus", "corpus_date")
-    fields.map(_.getType) shouldBe Seq("STRING", "INTEGER", "STRING", "INTEGER")
-    fields.map(_.getMode) shouldBe Seq("REQUIRED", "REQUIRED", "REQUIRED", "REQUIRED")
+    Future(bq.getTableSchema("bigquery-public-data:samples.shakespeare")).map { schema =>
+      val fields = schema.getFields.asScala
+      fields.size shouldBe 4
+      fields.map(_.getName) shouldBe Seq("word", "word_count", "corpus", "corpus_date")
+      fields.map(_.getType) shouldBe Seq("STRING", "INTEGER", "STRING", "INTEGER")
+      fields.map(_.getMode) shouldBe Seq("REQUIRED", "REQUIRED", "REQUIRED", "REQUIRED")
+    }
   }
 
   "getTableRows" should "work" in {
-    val rows = bq.getTableRows("bigquery-public-data:samples.shakespeare").take(10).toList
     val columns = Set("word", "word_count", "corpus", "corpus_date")
-    all(rows.map(_.keySet().asScala)) shouldBe columns
+    Future(bq.getTableRows("bigquery-public-data:samples.shakespeare").take(10).toList)
+      .map { rows => all(rows.map(_.keySet().asScala)) shouldBe columns }
   }
 
 }

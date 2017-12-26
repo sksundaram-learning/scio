@@ -19,9 +19,13 @@ package com.spotify.scio.bigquery
 
 import org.scalatest._
 
-class BigQueryPartitionUtilIT extends FlatSpec with Matchers {
+import scala.concurrent.{ExecutionContext, Future}
 
-  val bq = BigQueryClient.defaultInstance()
+class BigQueryPartitionUtilIT extends AsyncFlatSpec with Matchers {
+
+  implicit override def executionContext: ExecutionContext = ExecutionContext.Implicits.global
+
+  private val bq = BigQueryClient.defaultInstance()
 
   "latestQuery" should "work with legacy syntax" in {
     val input =
@@ -33,7 +37,7 @@ class BigQueryPartitionUtilIT extends FlatSpec with Matchers {
         |WHERE x = 0
       """.stripMargin
     val expected = input.replace("$LATEST", "20170102")
-    BigQueryPartitionUtil.latestQuery(bq, input) shouldBe expected
+    Future(BigQueryPartitionUtil.latestQuery(bq, input)).map(_ shouldBe expected)
   }
 
   it should "work with SQL syntax" in {
@@ -46,17 +50,17 @@ class BigQueryPartitionUtilIT extends FlatSpec with Matchers {
         |WHERE x = 0
       """.stripMargin
     val expected = input.replace("$LATEST", "20170102")
-    BigQueryPartitionUtil.latestQuery(bq, input) shouldBe expected
+    Future(BigQueryPartitionUtil.latestQuery(bq, input)).map(_ shouldBe expected)
   }
 
   it should "work with legacy syntax without $LATEST" in {
     val input = "SELECT * FROM [data-integration-test:samples_us.shakespeare]"
-    BigQueryPartitionUtil.latestQuery(bq, input) shouldBe input
+    Future(BigQueryPartitionUtil.latestQuery(bq, input)).map(_ shouldBe input)
   }
 
   it should "work with SQL syntax without $LATEST" in {
     val input = "SELECT * FROM `data-integration-test.samples_us.shakespeare`"
-    BigQueryPartitionUtil.latestQuery(bq, input) shouldBe input
+    Future(BigQueryPartitionUtil.latestQuery(bq, input)).map(_ shouldBe input)
   }
 
   it should "fail legacy syntax without latest common partition" in {
@@ -73,11 +77,10 @@ class BigQueryPartitionUtilIT extends FlatSpec with Matchers {
       "[data-integration-test:partition_a.table_$LATEST], " +
       "[data-integration-test:partition_b.table_$LATEST], " +
       "[data-integration-test:partition_c.table_$LATEST]"
-    // scalastyle:off no.whitespace.before.left.bracket
-    the [IllegalArgumentException] thrownBy {
-      BigQueryPartitionUtil.latestQuery(bq, input)
-    } should have message msg
-    // scalastyle:on no.whitespace.before.left.bracket
+    Future(BigQueryPartitionUtil.latestQuery(bq, input)).failed
+      .map { case e: IllegalArgumentException =>
+        e should have message msg
+      }
   }
 
   it should "fail SQL syntax without latest common partition" in {
@@ -94,32 +97,30 @@ class BigQueryPartitionUtilIT extends FlatSpec with Matchers {
       "`data-integration-test.partition_a.table_$LATEST`, " +
       "`data-integration-test.partition_b.table_$LATEST`, " +
       "`data-integration-test.partition_c.table_$LATEST`"
-    // scalastyle:off no.whitespace.before.left.bracket
-    the [IllegalArgumentException] thrownBy {
-      BigQueryPartitionUtil.latestQuery(bq, input)
-    } should have message msg
-    // scalastyle:on no.whitespace.before.left.bracket
+    Future(BigQueryPartitionUtil.latestQuery(bq, input)).failed
+      .map { case e: IllegalArgumentException =>
+        e should have message msg
+      }
   }
 
   "latestTable" should "work" in {
     val input = "data-integration-test:partition_a.table_$LATEST"
     val expected = input.replace("$LATEST", "20170103")
-    BigQueryPartitionUtil.latestTable(bq, input) shouldBe expected
+    Future(BigQueryPartitionUtil.latestTable(bq, input)).map(_ shouldBe expected)
   }
 
   it should "work without $LATEST" in {
     val input = "data-integration-test:samples_us.shakespeare"
-    BigQueryPartitionUtil.latestTable(bq, input) shouldBe input
+    Future(BigQueryPartitionUtil.latestTable(bq, input)).map(_ shouldBe input)
   }
 
   it should "fail table specification without latest partition" in {
     val input = "data-integration-test:samples_us.shakespeare_$LATEST"
     val msg = s"requirement failed: Cannot find latest partition for $input"
-    // scalastyle:off no.whitespace.before.left.bracket
-    the [IllegalArgumentException] thrownBy {
-      BigQueryPartitionUtil.latestTable(bq, input)
-    } should have message msg
-    // scalastyle:on no.whitespace.before.left.bracket
+    Future(BigQueryPartitionUtil.latestTable(bq, input)).failed
+      .map { case e: IllegalArgumentException =>
+        e should have message msg
+      }
   }
 
 }

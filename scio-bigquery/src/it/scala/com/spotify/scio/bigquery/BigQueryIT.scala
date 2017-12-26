@@ -17,9 +17,10 @@
 
 package com.spotify.scio.bigquery
 
-import com.spotify.scio.bigquery.types._
 import org.scalatest.Inspectors.forAll
 import org.scalatest._
+
+import scala.concurrent.{ExecutionContext, Future}
 
 object BigQueryIT {
 
@@ -38,7 +39,9 @@ object BigQueryIT {
 
 }
 
-class BigQueryIT extends FlatSpec with Matchers {
+class BigQueryIT extends AsyncFlatSpec with Matchers {
+
+  implicit override def executionContext: ExecutionContext = ExecutionContext.Implicits.global
 
   import BigQueryIT._
 
@@ -60,10 +63,14 @@ class BigQueryIT extends FlatSpec with Matchers {
       shakespeare("thy", 30, "kinglear", 1600))
     val expected = Seq(wordCount("i", 10), wordCount("thou", 20), wordCount("thy", 30))
 
-    val mbq = MockBigQuery()
-    mbq.mockTable(tableRef).withData(inData)
-    mbq.queryResult(legacyQuery) should contain theSameElementsAs expected
-    mbq.queryResult(sqlQuery) should contain theSameElementsAs expected
+    Future {
+      val mbq = MockBigQuery()
+      mbq.mockTable(tableRef).withData(inData)
+      (mbq.queryResult(legacyQuery), mbq.queryResult(sqlQuery))
+    }.map { rows =>
+      rows._1 should contain theSameElementsAs expected
+      rows._2 should contain theSameElementsAs expected
+    }
   }
 
   // =======================================================================
@@ -80,10 +87,14 @@ class BigQueryIT extends FlatSpec with Matchers {
       WordCount(Some("thou"), Some(20)),
       WordCount(Some("thy"), Some(30)))
 
-    val mbq = MockBigQuery()
-    mbq.mockTable(tableRef).withTypedData(inData)
-    mbq.typedQueryResult[WordCount](legacyQuery) should contain theSameElementsAs expected
-    mbq.typedQueryResult[WordCount](sqlQuery) should contain theSameElementsAs expected
+    Future {
+      val mbq = MockBigQuery()
+      mbq.mockTable(tableRef).withTypedData(inData)
+      (mbq.typedQueryResult[WordCount](legacyQuery), mbq.typedQueryResult[WordCount](sqlQuery))
+    }.map { rows =>
+      rows._1 should contain theSameElementsAs expected
+      rows._2 should contain theSameElementsAs expected
+    }
   }
 
   // =======================================================================
@@ -91,13 +102,17 @@ class BigQueryIT extends FlatSpec with Matchers {
   // =======================================================================
 
   it should "support sample data" in {
-    val mbq = MockBigQuery()
-    mbq.mockTable(tableRef).withSample(100)
-    forAll(mbq.queryResult(sqlQuery)) { r =>
-      val word = r.get("word").toString
-      word should not be null
-      word should not be empty
-      r.get("word_count").toString.toInt should be > 0
+    Future {
+      val mbq = MockBigQuery()
+      mbq.mockTable(tableRef).withSample(100)
+      mbq.queryResult(sqlQuery)
+    }.map { rows =>
+      forAll(rows) { r =>
+        val word = r.get("word").toString
+        word should not be null
+        word should not be empty
+        r.get("word_count").toString.toInt should be > 0
+      }
     }
   }
 
@@ -107,44 +122,53 @@ class BigQueryIT extends FlatSpec with Matchers {
 
   it should "fail insufficient sample data" in {
     val t = "clouddataflow-readonly:samples.weather_stations"
+    Future(MockBigQuery().mockTable(t).withSample(2000)).failed
+      .map { case e: IllegalArgumentException =>
+        e should have message "requirement failed: Sample size 1000 != requested 2000"
+      }
+  }
 
-    // scalastyle:off no.whitespace.before.left.bracket
-    the [IllegalArgumentException] thrownBy {
-      val mbq = MockBigQuery()
-      mbq.mockTable(t).withSample(2000)
-    } should have message s"requirement failed: Sample size 1000 != requested 2000"
-
-    the [IllegalArgumentException] thrownBy {
-      val mbq = MockBigQuery()
-      mbq.mockTable(t).withSample(2000, 5000)
-    } should have message s"requirement failed: Sample size 1000 < requested minimal 2000"
+  it should "fail insufficient sample data than minimum number of rows" in {
+    val t = "clouddataflow-readonly:samples.weather_stations"
+    Future(MockBigQuery().mockTable(t).withSample(2000, 5000)).failed
+      .map { case e: IllegalArgumentException =>
+        e should have message "requirement failed: Sample size 1000 < requested minimal 2000"
+      }
   }
 
   it should "fail duplicate mockTable" in {
-    val mbq = MockBigQuery()
-    mbq.mockTable(tableRef)
-    the [IllegalArgumentException] thrownBy {
+    val f = Future {
+      val mbq = MockBigQuery()
       mbq.mockTable(tableRef)
-    } should have message s"requirement failed: Table $tableRef already registered for mocking"
+      mbq.mockTable(tableRef)
+    }
+    f.failed
+      .map { case e: IllegalArgumentException =>
+        e should have message s"requirement failed: Table $tableRef already registered for mocking"
+      }
   }
 
   it should "fail duplicate mock data" in {
-    val mbq = MockBigQuery()
-    val mt = mbq.mockTable(tableRef)
-    mt.withData(Nil)
-    the [IllegalArgumentException] thrownBy {
+    val f = Future {
+      val mt = MockBigQuery().mockTable(tableRef)
       mt.withData(Nil)
-    } should have message s"requirement failed: Table $tableRef already populated with mock data"
+      mt.withData(Nil)
+    }
+    f.failed.map { case e: IllegalArgumentException =>
+      e should have message s"requirement failed: Table $tableRef already populated with mock data"
+    }
   }
 
   it should "fail missing mock data" in {
-    val mbq = MockBigQuery()
-    mbq.mockTable(tableRef)
-    the [RuntimeException] thrownBy {
+    val f = Future {
+      val mbq = MockBigQuery()
+      mbq.mockTable(tableRef)
       mbq.queryResult(sqlQuery)
-    } should have message
-      "404 Not Found, this is most likely caused by missing source table or mock data"
+    }
+    val msg = "404 Not Found, this is most likely caused by missing source table or mock data"
+    f.failed.map { case e: RuntimeException =>
+      e should have message msg
+    }
   }
-  // scalastyle:on no.whitespace.before.left.bracket
 
 }

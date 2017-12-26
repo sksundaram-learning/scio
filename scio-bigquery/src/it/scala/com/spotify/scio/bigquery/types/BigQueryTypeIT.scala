@@ -18,10 +18,10 @@
 package com.spotify.scio.bigquery.types
 
 import com.spotify.scio.bigquery.BigQueryClient
-import org.apache.beam.sdk.io.gcp.bigquery.BigQueryIO
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest._
 
 import scala.collection.JavaConverters._
+import scala.concurrent.{ExecutionContext, Future}
 
 object BigQueryTypeIT {
   @BigQueryType.fromQuery(
@@ -48,13 +48,6 @@ object BigQueryTypeIT {
 
   @BigQueryType.toTable
   case class ToTableT(word: String, word_count: Int)
-}
-
-class BigQueryTypeIT extends FlatSpec with Matchers {
-
-  import BigQueryTypeIT._
-
-  val bq = BigQueryClient.defaultInstance()
 
   val legacyQuery =
     "SELECT word, word_count FROM [bigquery-public-data:samples.shakespeare] WHERE word = 'Romeo'"
@@ -64,6 +57,15 @@ class BigQueryTypeIT extends FlatSpec with Matchers {
     "SELECT word, word_count FROM [data-integration-test:partition_a.table_%s]"
   val sqlLatestQuery =
     "SELECT word, word_count FROM `data-integration-test.partition_a.table_%s`"
+}
+
+class BigQueryTypeIT extends AsyncFlatSpec with Matchers {
+
+  implicit override def executionContext: ExecutionContext = ExecutionContext.Implicits.global
+
+  import BigQueryTypeIT._
+
+  private val bq = BigQueryClient.defaultInstance()
 
   "fromQuery" should "work with legacy syntax" in {
     val bqt = BigQueryType[LegacyT]
@@ -91,28 +93,30 @@ class BigQueryTypeIT extends FlatSpec with Matchers {
     fields.map(_.getMode) shouldBe Seq("NULLABLE", "NULLABLE")
   }
 
-  it should "round trip rows with legacy syntax" in {
-    val bqt = BigQueryType[LegacyT]
-    val rows = bq.getQueryRows(legacyQuery).toList
-    val typed = Seq(LegacyT("Romeo", 117L))
-    rows.map(bqt.fromTableRow) shouldBe typed
-    typed.map(bqt.toTableRow).map(bqt.fromTableRow) shouldBe typed
-  }
-
-  it should "round trip rows with SQL syntax" in {
-    val bqt = BigQueryType[SqlT]
-    val rows = bq.getQueryRows(sqlQuery).toList
-    val typed = Seq(SqlT(Some("Romeo"), Some(117L)))
-    rows.map(bqt.fromTableRow) shouldBe typed
-    typed.map(bqt.toTableRow).map(bqt.fromTableRow) shouldBe typed
-  }
-
   it should "work with legacy syntax with $LATEST" in {
     BigQueryType[LegacyLatestT].query shouldBe Some(legacyLatestQuery)
   }
 
   it should "work with SQL syntax with $LATEST" in {
     BigQueryType[SqlLatestT].query shouldBe Some(sqlLatestQuery)
+  }
+
+  it should "round trip rows with legacy syntax" in {
+    val bqt = BigQueryType[LegacyT]
+    val typed = Seq(LegacyT("Romeo", 117L))
+    Future(bq.getQueryRows(legacyQuery).toList).map { rows =>
+      rows.map(bqt.fromTableRow) shouldBe typed
+      typed.map(bqt.toTableRow).map(bqt.fromTableRow) shouldBe typed
+    }
+  }
+
+  it should "round trip rows with SQL syntax" in {
+    val bqt = BigQueryType[SqlT]
+    val typed = Seq(SqlT(Some("Romeo"), Some(117L)))
+    Future(bq.getQueryRows(sqlQuery).toList).map { rows =>
+      rows.map(bqt.fromTableRow) shouldBe typed
+      typed.map(bqt.toTableRow).map(bqt.fromTableRow) shouldBe typed
+    }
   }
 
   "fromTable" should "work" in {
