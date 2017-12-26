@@ -93,6 +93,17 @@ val commonSettings = Sonatype.sonatypeSettings ++ assemblySettings ++ Seq(
       Seq(Tests.Argument(TestFrameworks.ScalaTest, "-l", "org.scalatest.tags.Slow"))
     }
   },
+  concurrentRestrictions ++= {
+    // JVM reports incorrect available processors in a Docker container, override with nproc * 2
+    // https://bugs.openjdk.java.net/browse/JDK-8140793
+    if (sys.env.get("CIRCLECI").contains("true")) {
+      import sys.process._
+      val n = ("nproc" !!).trim.toInt
+      Seq(Tags.limitAll(n * 2))
+    } else {
+      Nil
+    }
+  },
 
   coverageExcludedPackages := Seq(
     "com\\.spotify\\.scio\\.examples\\..*",
