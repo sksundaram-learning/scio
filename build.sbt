@@ -293,13 +293,14 @@ lazy val scioTest: Project = Project(
     "org.apache.beam" % "beam-runners-google-cloud-dataflow-java" % beamVersion % "it",
     "org.apache.beam" % "beam-sdks-java-core" % beamVersion % "test" classifier "tests",
     "org.scalatest" %% "scalatest" % scalatestVersion,
-    "org.scalacheck" %% "scalacheck" % scalacheckVersion % "test",
+    "org.scalacheck" %% "scalacheck" % scalacheckVersion % "it,test",
     // DataFlow testing requires junit and hamcrest
     "org.hamcrest" % "hamcrest-all" % hamcrestVersion,
     "com.spotify" % "annoy" % annoyVersion % "test",
     "com.spotify.sparkey" % "sparkey" % sparkeyVersion % "test",
     "com.novocode" % "junit-interface" % junitInterfaceVersion,
-    "junit" % "junit" % junitVersion % "test"
+    "junit" % "junit" % junitVersion % "test",
+    "com.github.alexarchambault" %% "scalacheck-shapeless_1.13" % scalacheckShapelessVersion % "it,test"
   ),
   addCompilerPlugin(paradiseDependency)
 ).configs(
